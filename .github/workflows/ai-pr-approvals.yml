@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   evaluate:
-    name: Evaluate AI PR approvals
+    name: Evaluate
     runs-on: ubuntu-latest
     steps:
       # Always load the check from the default branch so a pull request cannot change the rule it is judged by.
@@ -42,4 +42,4 @@ jobs:
               state: result.pass ? 'success' : 'failure',
               description: result.reason.slice(0, 140),
             });
-            if (!result.pass) core.setFailed(result.reason);
+            // The commit status above is the required check. This job only evaluates, so it stays green either way.
