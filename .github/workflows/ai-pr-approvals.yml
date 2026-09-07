@@ -1,0 +1,28 @@
+name: AI PR approvals
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  pull_request_review:
+    types: [submitted, dismissed]
+
+permissions:
+  pull-requests: read
+  contents: read
+
+jobs:
+  check:
+    name: AI PR approvals
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const { evaluate } = require('./scripts/check-ai-pr-approvals.js');
+            const number = context.payload.pull_request.number;
+            const { data: pr } = await github.rest.pulls.get({ ...context.repo, pull_number: number });
+            const reviews = await github.paginate(github.rest.pulls.listReviews, { ...context.repo, pull_number: number });
+            const result = evaluate(pr, reviews);
+            core.info(result.reason);
+            if (!result.pass) core.setFailed(result.reason);
