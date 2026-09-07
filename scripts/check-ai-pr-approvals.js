@@ -17,6 +17,9 @@ const GATED_AUTHOR_LOGINS = new Set(
 // Accounts that are type "User" but are not people.
 const NON_HUMAN_LOGINS = new Set(["claude"]);
 
+// Only people with access to the repo can approve. On a public repo anyone can submit a review.
+const TRUSTED_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+
 function isGatedAuthor(user) {
   return Boolean(user) && GATED_AUTHOR_LOGINS.has(user.login);
 }
@@ -28,6 +31,7 @@ function countHumanApprovals(reviews, headSha) {
   for (const r of [...reviews].sort((a, b) => a.id - b.id)) {
     if (!r.user || r.user.type !== "User") continue;
     if (NON_HUMAN_LOGINS.has(r.user.login.toLowerCase())) continue;
+    if (!TRUSTED_ASSOCIATIONS.has(r.author_association)) continue;
     if (r.state === "COMMENTED" || r.state === "PENDING") continue;
     latestByUser.set(r.user.login, r);
   }
