@@ -6,6 +6,10 @@ on:
   pull_request_review:
     types: [submitted, dismissed]
 
+# GATED_AUTHORS lists the bot accounts that need two approvals. Default is Claude only.
+env:
+  GATED_AUTHORS: "claude[bot],app/claude,dependabot[bot]"
+
 permissions:
   pull-requests: read
   contents: read

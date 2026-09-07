@@ -10,7 +10,9 @@ const REQUIRED_HUMAN_APPROVALS = 2;
 
 // Only these authors are gated. Dependabot, Renovate, and other bots keep the repo's normal rules.
 // REST returns the GitHub App as "claude[bot]"; GraphQL and `gh` render the same account as "app/claude".
-const GATED_AUTHOR_LOGINS = new Set(["claude[bot]", "app/claude"]);
+const GATED_AUTHOR_LOGINS = new Set(
+  (process.env.GATED_AUTHORS || "claude[bot],app/claude").split(",").map((s) => s.trim()).filter(Boolean)
+);
 
 // Accounts that are type "User" but are not people.
 const NON_HUMAN_LOGINS = new Set(["claude"]);
