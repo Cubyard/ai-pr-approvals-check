@@ -1,5 +1,5 @@
-// Required status check: PRs opened by a bot or GitHub App need two human approvals.
-// PRs opened by a person are unaffected and pass immediately.
+// Required check: pull requests opened by Claude need two human approvals on the current head commit.
+// Pull requests opened by a person pass immediately.
 //
 // Runs two ways:
 //   1. Inside GitHub Actions via actions/github-script (see .github/workflows/ai-pr-approvals.yml)
@@ -8,38 +8,47 @@
 
 const REQUIRED_HUMAN_APPROVALS = 2;
 
-function isBotAuthor(user) {
-  return user.type === "Bot" || user.login.startsWith("app/") || user.login.endsWith("[bot]");
+// Only these authors are gated. Dependabot, Renovate, and other bots keep the repo's normal rules.
+// REST returns the GitHub App as "claude[bot]"; GraphQL and `gh` render the same account as "app/claude".
+const GATED_AUTHOR_LOGINS = new Set(["claude[bot]", "app/claude"]);
+
+// Accounts that are type "User" but are not people.
+const NON_HUMAN_LOGINS = new Set(["claude"]);
+
+function isGatedAuthor(user) {
+  return Boolean(user) && GATED_AUTHOR_LOGINS.has(user.login);
 }
 
-// Latest review per human user wins; dismissed or superseded approvals do not count.
-function countHumanApprovals(reviews) {
+// One vote per person, latest review wins, and only approvals given on the commit being merged count.
+// A new push therefore resets the count, regardless of the repo's dismiss-stale setting.
+function countHumanApprovals(reviews, headSha) {
   const latestByUser = new Map();
-  for (const r of reviews) {
+  for (const r of [...reviews].sort((a, b) => a.id - b.id)) {
     if (!r.user || r.user.type !== "User") continue;
-    if (r.state === "COMMENTED") continue; // comments never change approval state
-    latestByUser.set(r.user.login, r.state);
+    if (NON_HUMAN_LOGINS.has(r.user.login.toLowerCase())) continue;
+    if (r.state === "COMMENTED" || r.state === "PENDING") continue;
+    latestByUser.set(r.user.login, r);
   }
-  const approvers = [...latestByUser].filter(([, s]) => s === "APPROVED").map(([u]) => u);
-  return approvers;
+  return [...latestByUser.values()]
+    .filter((r) => r.state === "APPROVED" && r.commit_id === headSha)
+    .map((r) => r.user.login);
 }
 
 function evaluate(pr, reviews) {
-  if (!isBotAuthor(pr.user)) {
-    return { pass: true, reason: `Author ${pr.user.login} is a person. Standard review rules apply.` };
+  if (!isGatedAuthor(pr.user)) {
+    return { pass: true, reason: `Author ${pr.user.login} is not a gated bot. Standard review rules apply.` };
   }
-  const approvers = countHumanApprovals(reviews);
+  const approvers = countHumanApprovals(reviews, pr.head.sha);
   const pass = approvers.length >= REQUIRED_HUMAN_APPROVALS;
   return {
     pass,
-    reason: `Author ${pr.user.login} is a bot. ${approvers.length} of ${REQUIRED_HUMAN_APPROVALS} required human approvals` +
+    reason: `Author ${pr.user.login} is a bot. ${approvers.length} of ${REQUIRED_HUMAN_APPROVALS} required human approvals on ${pr.head.sha.slice(0, 7)}` +
       (approvers.length ? ` (${approvers.join(", ")})` : "") + ".",
   };
 }
 
-module.exports = { evaluate, isBotAuthor, countHumanApprovals, REQUIRED_HUMAN_APPROVALS };
+module.exports = { evaluate, isGatedAuthor, countHumanApprovals, REQUIRED_HUMAN_APPROVALS };
 
-// Local verification entry point
 if (require.main === module) {
   const { execFileSync } = require("child_process");
   const [owner, repo, num] = process.argv.slice(2);

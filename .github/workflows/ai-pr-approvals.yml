@@ -9,13 +9,18 @@ on:
 permissions:
   pull-requests: read
   contents: read
+  statuses: write
 
 jobs:
-  check:
-    name: AI PR approvals
+  evaluate:
+    name: Evaluate AI PR approvals
     runs-on: ubuntu-latest
     steps:
+      # Always load the check from the default branch so a pull request cannot change the rule it is judged by.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
       - uses: actions/github-script@v7
         with:
           script: |
@@ -25,4 +30,12 @@ jobs:
             const reviews = await github.paginate(github.rest.pulls.listReviews, { ...context.repo, pull_number: number });
             const result = evaluate(pr, reviews);
             core.info(result.reason);
+            // Publish one status on the PR head commit from every event type, so review events update the same context.
+            await github.rest.repos.createCommitStatus({
+              ...context.repo,
+              sha: pr.head.sha,
+              context: 'AI PR approvals',
+              state: result.pass ? 'success' : 'failure',
+              description: result.reason.slice(0, 140),
+            });
             if (!result.pass) core.setFailed(result.reason);
