@@ -32,7 +32,10 @@ jobs:
       - uses: actions/github-script@v7
         with:
           script: |
-            const { evaluate, candidateApprovers } = require('./scripts/check-ai-pr-approvals.js');
+            // The script comes from the default branch and this file from the pull request, so they can differ.
+            const gate = require('./scripts/check-ai-pr-approvals.js');
+            const { evaluate } = gate;
+            const candidateApprovers = gate.candidateApprovers || (() => []);
             const number = context.payload.pull_request.number;
             const { data: pr } = await github.rest.pulls.get({ ...context.repo, pull_number: number });
             const reviews = await github.paginate(github.rest.pulls.listReviews, { ...context.repo, pull_number: number });
