@@ -1,0 +1,4 @@
+# Changes to the approval gate need a code owner's review, whoever opened the pull request.
+/.github/workflows/ai-pr-approvals.yml @arjabbar
+/scripts/check-ai-pr-approvals.js @arjabbar
+/.github/CODEOWNERS @arjabbar

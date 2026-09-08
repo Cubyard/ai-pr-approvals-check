@@ -6,9 +6,11 @@ on:
   pull_request_review:
     types: [submitted, dismissed]
 
-# GATED_AUTHORS lists the bot accounts that need two approvals. Default is Claude only.
-env:
-  GATED_AUTHORS: "claude[bot],app/claude,dependabot[bot]"
+# One run at a time per pull request. A newer event cancels an older run so two events seconds apart
+# cannot finish out of order and leave a stale result on the commit.
+concurrency:
+  group: ai-pr-approvals-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 permissions:
   pull-requests: read
@@ -20,7 +22,9 @@ jobs:
     name: Evaluate
     runs-on: ubuntu-latest
     steps:
-      # Always load the check from the default branch so a pull request cannot change the rule it is judged by.
+      # The script that counts approvals is loaded from the default branch. This workflow file is not:
+      # GitHub runs it from the pull request's own copy, which is why the script fails closed when a
+      # pull request edits the gate and why CODEOWNERS covers .github/workflows.
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.repository.default_branch }}
@@ -28,13 +32,28 @@ jobs:
       - uses: actions/github-script@v7
         with:
           script: |
-            const { evaluate } = require('./scripts/check-ai-pr-approvals.js');
+            // The script comes from the default branch and this file from the pull request, so they can differ.
+            const gate = require('./scripts/check-ai-pr-approvals.js');
+            const { evaluate } = gate;
+            const candidateApprovers = gate.candidateApprovers || (() => []);
             const number = context.payload.pull_request.number;
             const { data: pr } = await github.rest.pulls.get({ ...context.repo, pull_number: number });
             const reviews = await github.paginate(github.rest.pulls.listReviews, { ...context.repo, pull_number: number });
-            const result = evaluate(pr, reviews);
+            const files = await github.paginate(github.rest.pulls.listFiles, { ...context.repo, pull_number: number });
+            // A reviewer only counts with write access or better. Lookup failure means they do not count.
+            const permissions = new Map();
+            for (const username of candidateApprovers(reviews)) {
+              try {
+                const { data } = await github.rest.repos.getCollaboratorPermissionLevel({ ...context.repo, username });
+                permissions.set(username, data.permission);
+              } catch (e) {
+                core.warning(`Could not read permission for ${username}: ${e.message}`);
+              }
+            }
+            const result = evaluate(pr, reviews, files, permissions);
             core.info(result.reason);
-            // Publish one status on the PR head commit from every event type, so review events update the same context.
+            // The commit status is the required check. The ruleset pins it to the GitHub Actions app,
+            // so a status posted by a person's token does not satisfy the rule.
             await github.rest.repos.createCommitStatus({
               ...context.repo,
               sha: pr.head.sha,
@@ -42,4 +61,3 @@ jobs:
               state: result.pass ? 'success' : 'failure',
               description: result.reason.slice(0, 140),
             });
-            // The commit status above is the required check. This job only evaluates, so it stays green either way.
